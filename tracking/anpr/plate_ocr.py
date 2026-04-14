@@ -42,10 +42,31 @@ class PlateReading:
 class PlateOCR:
     """Wraps fast-plate-ocr's LicensePlateRecognizer."""
 
-    def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
+    def __init__(self, model_name: str = DEFAULT_MODEL, device: str = "auto") -> None:
         self.model_name = model_name
-        print(f"[PlateOCR] Loading {model_name} (ONNX) ...")
-        self._rec = LicensePlateRecognizer(model_name)
+        # Pick GPU if onnxruntime has a CUDA provider; else CPU.
+        resolved = device
+        if device == "auto":
+            try:
+                import onnxruntime as ort
+                resolved = (
+                    "cuda" if "CUDAExecutionProvider" in ort.get_available_providers()
+                    else "cpu"
+                )
+            except Exception:
+                resolved = "cpu"
+        print(f"[PlateOCR] Loading {model_name} (ONNX) device={resolved} ...")
+        try:
+            self._rec = LicensePlateRecognizer(model_name, device=resolved)
+        except TypeError:
+            # Older fast-plate-ocr without device kwarg
+            self._rec = LicensePlateRecognizer(model_name)
+        except Exception as e:
+            print(f"[PlateOCR] GPU load failed ({e}); falling back to CPU.")
+            try:
+                self._rec = LicensePlateRecognizer(model_name, device="cpu")
+            except TypeError:
+                self._rec = LicensePlateRecognizer(model_name)
         print("[PlateOCR] Loaded.")
 
     # ── Public API ────────────────────────────────────────────────────────────

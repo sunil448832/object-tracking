@@ -71,10 +71,14 @@ class VehicleDetector:
             else ("cuda" if torch.cuda.is_available() else "cpu")
         )
 
-        print(f"[Detector] Loading {model_name} on {self.device} ...")
+        self.use_fp16 = self.device.type == "cuda"
+        print(f"[Detector] Loading {model_name} on {self.device} "
+              f"(fp16={self.use_fp16}) ...")
         self.processor = RTDetrImageProcessor.from_pretrained(model_name)
         self.model = RTDetrV2ForObjectDetection.from_pretrained(model_name)
         self.model.eval().to(self.device)
+        if self.use_fp16:
+            self.model = self.model.half()
         self.id2label = self.model.config.id2label
         print(f"[Detector] Loaded. Filtering for class IDs: "
               f"{sorted(self.class_ids)} "
@@ -95,6 +99,9 @@ class VehicleDetector:
         """
         image = Image.fromarray(frame_rgb)
         inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+        if self.use_fp16:
+            inputs = {k: (v.half() if torch.is_floating_point(v) else v)
+                      for k, v in inputs.items()}
         outputs = self.model(**inputs)
 
         target_sizes = torch.tensor([image.size[::-1]], device=self.device)  # (H, W)

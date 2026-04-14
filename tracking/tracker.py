@@ -168,8 +168,8 @@ def _test() -> None:
     args = ap.parse_args()
 
     # Lazy-import model modules so unit-testing the tracker alone doesn't require them.
-    from .detector import VehicleDetector
-    from .reid import DinoV2Embedder
+    from .detector.detector import VehicleDetector
+    from .botsort.reid import DinoV2Embedder
 
     cap = cv2.VideoCapture(args.video)
     if not cap.isOpened():

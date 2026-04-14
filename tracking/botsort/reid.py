@@ -47,9 +47,13 @@ class DinoV2Embedder:
             else ("cuda" if torch.cuda.is_available() else "cpu")
         )
 
-        print(f"[ReID] Loading {model_name} on {self.device} ...")
+        self.use_fp16 = self.device.type == "cuda"
+        print(f"[ReID] Loading {model_name} on {self.device} "
+              f"(fp16={self.use_fp16}) ...")
         self.model = torch.hub.load("facebookresearch/dinov2", model_name)
         self.model.eval().to(self.device)
+        if self.use_fp16:
+            self.model = self.model.half()
         self.embed_dim = self.model.embed_dim
         print(f"[ReID] Loaded. Embedding dim = {self.embed_dim}")
 
@@ -79,9 +83,11 @@ class DinoV2Embedder:
 
         tensors = [self._to_tensor(c) for c in crops]
         batch = torch.stack(tensors).to(self.device)
+        if self.use_fp16:
+            batch = batch.half()
 
         features = self.model(batch)                      # (N, D), CLS token
-        features = F.normalize(features, p=2, dim=-1)     # L2 normalise
+        features = F.normalize(features.float(), p=2, dim=-1)  # L2 normalise
         return features.cpu().numpy().astype(np.float32)
 
     # ── Internal ──────────────────────────────────────────────────────────────

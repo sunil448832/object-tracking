@@ -37,11 +37,11 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from tracking.detector import VehicleDetector
-from tracking.reid import DinoV2Embedder
+from tracking.detector.detector import VehicleDetector
+from tracking.botsort.reid import DinoV2Embedder
 from tracking.tracker import Tracker, BoTSORTConfig, TrackedObject
-from tracking.plate_detector import PlateDetector
-from tracking.plate_ocr import PlateOCR
+from tracking.anpr.plate_detector import PlateDetector
+from tracking.anpr.plate_ocr import PlateOCR
 
 
 # ── Per-track plate memory ───────────────────────────────────────────────────
@@ -148,6 +148,13 @@ def run_pipeline(
     frame_idx = -1
     t0 = time.time()
 
+    # Per-module cumulative timing (seconds) and call counts
+    timings: dict[str, float] = {
+        "detector": 0.0, "reid": 0.0, "tracker": 0.0,
+        "plate_det": 0.0, "plate_ocr": 0.0,
+    }
+    calls: dict[str, int] = {k: 0 for k in timings}
+
     while True:
         ok, frame_bgr = cap.read()
         if not ok:
@@ -161,11 +168,15 @@ def run_pipeline(
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
         # 1) Detect vehicles
+        _ts = time.perf_counter()
         dets = detector.detect(frame_rgb)
+        t_det = time.perf_counter() - _ts
+        timings["detector"] += t_det; calls["detector"] += 1
 
         # 2) Appearance embeddings (batched)
         feats = None
         crops_rgb: list[np.ndarray] = []
+        t_reid = 0.0
         if len(dets):
             for d in dets:
                 x1, y1, x2, y2 = [max(0, int(v)) for v in d.xyxy]
@@ -174,10 +185,16 @@ def run_pipeline(
                     crops_rgb.append(frame_rgb[y1:y2, x1:x2])
                 else:
                     crops_rgb.append(np.zeros((14, 14, 3), dtype=np.uint8))
+            _ts = time.perf_counter()
             feats = embedder.embed([Image.fromarray(c) for c in crops_rgb])
+            t_reid = time.perf_counter() - _ts
+            timings["reid"] += t_reid; calls["reid"] += 1
 
         # 3) Track
+        _ts = time.perf_counter()
         tracks = tracker.update(dets, feats, frame_bgr=frame_bgr)
+        t_trk = time.perf_counter() - _ts
+        timings["tracker"] += t_trk; calls["tracker"] += 1
 
         # 4) Plate detection + OCR per tracked vehicle — BATCHED across tracks.
         plate_boxes_this_frame: dict[int, tuple[int, int, int, int]] = {}
@@ -208,9 +225,14 @@ def run_pipeline(
             ocr_vehicle_crops.append(frame_rgb[vy1:vy2, vx1:vx2])
 
         # 4b) Batched plate detection on all vehicle crops
-        batch_plate_dets: list[list] = (
-            plate_det.detect_batch(ocr_vehicle_crops) if ocr_vehicle_crops else []
-        )
+        t_pdet = 0.0
+        if ocr_vehicle_crops:
+            _ts = time.perf_counter()
+            batch_plate_dets: list[list] = plate_det.detect_batch(ocr_vehicle_crops)
+            t_pdet = time.perf_counter() - _ts
+            timings["plate_det"] += t_pdet; calls["plate_det"] += 1
+        else:
+            batch_plate_dets = []
 
         # 4c) Collect plate crops that were actually detected → batched OCR
         plate_crops_rgb: list[np.ndarray] = []
@@ -235,8 +257,12 @@ def run_pipeline(
             )
 
         # 4d) Single batched OCR call for all plate crops in this frame
+        t_ocr = 0.0
         if plate_crops_rgb:
+            _ts = time.perf_counter()
             readings = plate_ocr.read(plate_crops_rgb, return_confidence=True)
+            t_ocr = time.perf_counter() - _ts
+            timings["plate_ocr"] += t_ocr; calls["plate_ocr"] += 1
             for tid, det_score, r in zip(plate_owner_ids, plate_det_scores, readings):
                 conf = _mean_char_confidence(r.char_probs)
                 # Reject low-confidence / empty OCR reads
@@ -273,7 +299,10 @@ def run_pipeline(
             print(f"[Pipeline] frame {frame_idx:4d}  "
                   f"dets={len(dets):2d}  tracks={len(tracks):2d}  "
                   f"plates_known={sum(1 for m in plate_memory.values() if m.text)}  "
-                  f"({rate:.2f} fps)")
+                  f"({rate:.2f} fps)  "
+                  f"[det={t_det*1000:.1f} reid={t_reid*1000:.1f} "
+                  f"trk={t_trk*1000:.1f} pdet={t_pdet*1000:.1f} "
+                  f"ocr={t_ocr*1000:.1f} ms]")
 
     cap.release()
     writer.release()
@@ -282,6 +311,17 @@ def run_pipeline(
     print(f"\n[Pipeline] Processed {processed} frames in {total_elapsed:.1f}s "
           f"({processed / max(total_elapsed, 1e-6):.2f} fps avg)")
     print(f"[Pipeline] Output video: {output_path}")
+
+    # Per-module timing summary
+    print("\n[Pipeline] Per-module timing (ms/frame averaged over all processed frames):")
+    n = max(processed, 1)
+    for name in ("detector", "reid", "tracker", "plate_det", "plate_ocr"):
+        total_ms = timings[name] * 1000
+        per_frame = total_ms / n
+        per_call = (total_ms / calls[name]) if calls[name] else 0.0
+        print(f"  {name:10s}  {per_frame:7.2f} ms/frame   "
+              f"{per_call:7.2f} ms/call   "
+              f"(called {calls[name]}/{processed} frames)")
     print(f"\n[Pipeline] Final plate readings ({len(plate_memory)} tracks with plates):")
     for tid in sorted(plate_memory):
         m = plate_memory[tid]

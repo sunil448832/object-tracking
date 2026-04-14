@@ -1,0 +1,20 @@
+# Core ML / Models
+torch>=2.0.0
+torchvision>=0.15.0
+transformers==5.5.0
+
+# Plate detection + OCR
+open-image-models[onnx]>=0.2.0
+fast-plate-ocr>=0.1.0
+onnxruntime-gpu>=1.17.0
+
+# Image processing
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Numerical / matching
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Plotting (optional, used in tracker viz)
+matplotlib>=3.7.0

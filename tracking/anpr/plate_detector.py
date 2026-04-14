@@ -54,12 +54,32 @@ class PlateDetector:
     ) -> None:
         self.model_name = model_name
         self.threshold = threshold
-        print(f"[PlateDet] Loading {model_name} (ONNX) ...")
-        self._det = _OIMLicensePlateDetector(
-            detection_model=model_name,  # type: ignore[arg-type]
-            conf_thresh=threshold,
-            providers=providers,  # default: ORT chooses (CPU by default if no GPU)
-        )
+        if providers is None:
+            try:
+                import onnxruntime as ort  # noqa: F401
+                avail = ort.get_available_providers()
+                providers = (
+                    ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                    if "CUDAExecutionProvider" in avail
+                    else ["CPUExecutionProvider"]
+                )
+            except Exception:
+                providers = ["CPUExecutionProvider"]
+        print(f"[PlateDet] Loading {model_name} (ONNX) providers={providers} ...")
+        try:
+            self._det = _OIMLicensePlateDetector(
+                detection_model=model_name,  # type: ignore[arg-type]
+                conf_thresh=threshold,
+                providers=providers,
+            )
+        except Exception as e:
+            print(f"[PlateDet] Failed with providers={providers} ({e}); "
+                  f"falling back to CPU.")
+            self._det = _OIMLicensePlateDetector(
+                detection_model=model_name,  # type: ignore[arg-type]
+                conf_thresh=threshold,
+                providers=["CPUExecutionProvider"],
+            )
         print(f"[PlateDet] Loaded.")
 
     # ── Public API ────────────────────────────────────────────────────────────
