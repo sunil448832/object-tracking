@@ -1,0 +1,51 @@
+# Data
+data/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+
+# Models / weights
+*.pt
+*.pth
+*.onnx
+*.engine
+*.weights
+*.h5
+*.pkl
+*.ckpt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+build/
+dist/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Env / secrets
+.env
+*.key
+kaggle.json
+
+# Logs / outputs
+*.log
+runs/
+wandb/
+outputs/
